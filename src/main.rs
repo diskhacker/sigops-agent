@@ -1,14 +1,18 @@
 mod config;
 mod discovery;
 mod executor;
+mod health;
 mod heartbeat;
 
 use clap::Parser;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use config::Config;
 use discovery::{collect_host_info, discover_tools};
+use health::serve_health;
 use heartbeat::HeartbeatClient;
 
 #[tokio::main]
@@ -41,24 +45,73 @@ async fn main() {
         "Host discovery complete"
     );
 
+    // Shared shutdown flag
+    let shutdown = Arc::new(AtomicBool::new(false));
+
+    // Start health endpoint
+    let health_shutdown = shutdown.clone();
+    let health_handle = tokio::spawn(async move {
+        serve_health(9100, health_shutdown).await;
+    });
+
     // Start heartbeat loop
     let hb_client = HeartbeatClient::new(&config.server_url, &config.api_token);
     let interval = Duration::from_secs(config.heartbeat_interval);
 
-    loop {
-        match hb_client
-            .send_heartbeat(&agent_id, &config.tenant_id, &host_info, &tools)
-            .await
-        {
-            Ok(resp) => {
-                info!(status = %resp.status, "heartbeat acknowledged");
+    let hb_shutdown = shutdown.clone();
+    let hb_handle = tokio::spawn(async move {
+        while !hb_shutdown.load(Ordering::Relaxed) {
+            match hb_client
+                .send_heartbeat(&agent_id, &config.tenant_id, &host_info, &tools)
+                .await
+            {
+                Ok(resp) => {
+                    info!(status = %resp.status, "heartbeat acknowledged");
+                }
+                Err(e) => {
+                    error!(error = %e, "heartbeat failed — will retry");
+                }
             }
-            Err(e) => {
-                error!(error = %e, "heartbeat failed — will retry");
-            }
+            tokio::time::sleep(interval).await;
         }
-        tokio::time::sleep(interval).await;
+        info!("heartbeat loop stopped");
+    });
+
+    // Wait for shutdown signal (SIGTERM or SIGINT)
+    tokio::select! {
+        _ = tokio::signal::ctrl_c() => {
+            warn!("received SIGINT, shutting down gracefully");
+        }
+        _ = async {
+            #[cfg(unix)]
+            {
+                let mut sigterm = tokio::signal::unix::signal(
+                    tokio::signal::unix::SignalKind::terminate(),
+                ).expect("failed to register SIGTERM handler");
+                sigterm.recv().await;
+            }
+            #[cfg(not(unix))]
+            {
+                // On non-unix platforms, just wait forever (ctrl_c will fire)
+                std::future::pending::<()>().await;
+            }
+        } => {
+            warn!("received SIGTERM, shutting down gracefully");
+        }
     }
+
+    // Signal all tasks to stop
+    shutdown.store(true, Ordering::Relaxed);
+    info!("waiting for tasks to finish...");
+
+    // Give tasks time to finish
+    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+        let _ = hb_handle.await;
+        let _ = health_handle.await;
+    })
+    .await;
+
+    info!("SigOps Agent stopped");
 }
 
 #[cfg(test)]
