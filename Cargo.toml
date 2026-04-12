@@ -1,0 +1,26 @@
+[package]
+name = "sigops-agent"
+version = "0.1.0"
+edition = "2021"
+description = "SigOps infrastructure agent — heartbeat, tool discovery, command execution"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", features = ["serde"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+clap = { version = "4", features = ["derive", "env"] }
+hostname = "0.4"
+thiserror = "1"
+
+[dev-dependencies]
+mockito = "1"
+
+[[bin]]
+name = "sigops-agent"
+path = "src/main.rs"
