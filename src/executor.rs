@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use serde::{Deserialize, Serialize};
 use std::process::Command as SysCommand;
 use std::time::Instant;
@@ -37,6 +39,7 @@ pub fn execute_task(cmd: &TaskCommand) -> TaskResult {
     let result = match cmd.tool_name.as_str() {
         "sigops.restart" => execute_restart(cmd),
         "sigops.http" => execute_http_sync(cmd),
+        "sigops.notify_slack" => execute_notify_slack(cmd),
         "sigops.condition" => execute_condition(cmd),
         "sigops.wait" => execute_wait(cmd),
         _ => Err(format!("unknown tool: {}", cmd.tool_name)),
@@ -117,6 +120,56 @@ fn execute_http_sync(cmd: &TaskCommand) -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({
         "status": status_code,
         "ok": (200..300).contains(&status_code),
+    }))
+}
+
+fn execute_notify_slack(cmd: &TaskCommand) -> Result<serde_json::Value, String> {
+    let channel = cmd.input["channel"]
+        .as_str()
+        .ok_or("missing 'channel' field")?;
+    let message = cmd.input["message"]
+        .as_str()
+        .ok_or("missing 'message' field")?;
+
+    let webhook_url = cmd.input["webhookUrl"]
+        .as_str()
+        .unwrap_or("https://hooks.slack.com/services/placeholder");
+
+    let payload = serde_json::json!({
+        "channel": channel,
+        "text": message,
+    });
+
+    let payload_str =
+        serde_json::to_string(&payload).map_err(|e| format!("json encode failed: {}", e))?;
+
+    let output = SysCommand::new("curl")
+        .args([
+            "-s",
+            "-o",
+            "/dev/null",
+            "-w",
+            "%{http_code}",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "-d",
+            &payload_str,
+            webhook_url,
+        ])
+        .output()
+        .map_err(|e| format!("curl failed: {}", e))?;
+
+    let status_code = String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .parse::<u16>()
+        .unwrap_or(0);
+
+    Ok(serde_json::json!({
+        "ok": (200..300).contains(&status_code),
+        "channel": channel,
+        "status": status_code,
     }))
 }
 
@@ -275,5 +328,29 @@ mod tests {
         let result = execute_task(&cmd);
         assert_eq!(result.status, TaskStatus::Failed);
         assert!(result.error.unwrap().contains("invalid service name"));
+    }
+
+    #[test]
+    fn test_notify_slack_missing_channel() {
+        let cmd = TaskCommand {
+            task_id: "t1".to_string(),
+            tool_name: "sigops.notify_slack".to_string(),
+            input: serde_json::json!({"message": "hello"}),
+        };
+        let result = execute_task(&cmd);
+        assert_eq!(result.status, TaskStatus::Failed);
+        assert!(result.error.unwrap().contains("channel"));
+    }
+
+    #[test]
+    fn test_notify_slack_missing_message() {
+        let cmd = TaskCommand {
+            task_id: "t1".to_string(),
+            tool_name: "sigops.notify_slack".to_string(),
+            input: serde_json::json!({"channel": "#alerts"}),
+        };
+        let result = execute_task(&cmd);
+        assert_eq!(result.status, TaskStatus::Failed);
+        assert!(result.error.unwrap().contains("message"));
     }
 }

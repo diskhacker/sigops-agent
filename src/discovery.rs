@@ -97,8 +97,8 @@ mod tests {
     #[test]
     fn test_discover_tools_returns_vec() {
         let tools = discover_tools();
-        // We can't guarantee which tools are installed, but it should not panic
-        assert!(tools.len() >= 0);
+        // We can't guarantee which tools are installed, but it should return a valid vec
+        let _ = tools.len();
     }
 
     #[test]
