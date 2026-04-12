@@ -11,7 +11,7 @@ use tokio::net::TcpListener;
 use tracing::{debug, error, info};
 
 /// Starts the health HTTP server. Returns when `shutdown` is set to true.
-pub async fn serve_health(port: u16, shutdown: Arc<AtomicBool>) {
+pub async fn serve_health(port: u16, shutdown: Arc<AtomicBool>, agent_id: String) {
     let addr = format!("0.0.0.0:{}", port);
     let listener = match TcpListener::bind(&addr).await {
         Ok(l) => {
@@ -49,6 +49,7 @@ pub async fn serve_health(port: u16, shutdown: Arc<AtomicBool>) {
             "status": "ok",
             "agent": "sigops-agent",
             "version": env!("CARGO_PKG_VERSION"),
+            "agentId": agent_id,
         });
         let body_str = serde_json::to_string(&body).unwrap_or_default();
         let response = format!(
@@ -73,7 +74,7 @@ mod tests {
         let shutdown_clone = shutdown.clone();
 
         let handle = tokio::spawn(async move {
-            serve_health(0, shutdown_clone).await; // port 0 = OS-assigned
+            serve_health(0, shutdown_clone, "test-agent-id".to_string()).await;
         });
 
         // Give it a moment to bind, then signal shutdown
@@ -91,13 +92,16 @@ mod tests {
 
     #[test]
     fn test_health_response_format() {
+        let agent_id = "test-agent-123";
         let body = serde_json::json!({
             "status": "ok",
             "agent": "sigops-agent",
             "version": env!("CARGO_PKG_VERSION"),
+            "agentId": agent_id,
         });
         let s = serde_json::to_string(&body).unwrap();
         assert!(s.contains("\"status\":\"ok\""));
         assert!(s.contains("sigops-agent"));
+        assert!(s.contains("\"agentId\":\"test-agent-123\""));
     }
 }

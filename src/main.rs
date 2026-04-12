@@ -50,8 +50,9 @@ async fn main() {
 
     // Start health endpoint
     let health_shutdown = shutdown.clone();
+    let health_agent_id = agent_id.clone();
     let health_handle = tokio::spawn(async move {
-        serve_health(9100, health_shutdown).await;
+        serve_health(9100, health_shutdown, health_agent_id).await;
     });
 
     // Start heartbeat loop
@@ -62,14 +63,14 @@ async fn main() {
     let hb_handle = tokio::spawn(async move {
         while !hb_shutdown.load(Ordering::Relaxed) {
             match hb_client
-                .send_heartbeat(&agent_id, &config.tenant_id, &host_info, &tools)
+                .send_heartbeat_with_retry(&agent_id, &config.tenant_id, &host_info, &tools)
                 .await
             {
                 Ok(resp) => {
                     info!(status = %resp.status, "heartbeat acknowledged");
                 }
                 Err(e) => {
-                    error!(error = %e, "heartbeat failed — will retry");
+                    error!(error = %e, "heartbeat failed after retries — will try next cycle");
                 }
             }
             tokio::time::sleep(interval).await;
