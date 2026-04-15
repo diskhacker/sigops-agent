@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
 use crate::discovery::{DiscoveredTool, HostInfo};
+use crate::security::TokenStore;
 
 /// Calculate exponential backoff delay for retry attempts.
 /// Backoff sequence: 2s, 4s, 8s, 16s, capped at 60s.
@@ -31,12 +32,16 @@ pub struct HeartbeatPayload {
 pub struct HeartbeatResponse {
     pub agent_id: String,
     pub status: String,
+    /// Optional server-issued rotated bearer token. When present, the agent
+    /// swaps its in-memory + on-disk token before the next request.
+    #[serde(default)]
+    pub rotated_token: Option<String>,
 }
 
 pub struct HeartbeatClient {
     client: Client,
     server_url: String,
-    api_token: String,
+    tokens: TokenStore,
 }
 
 impl HeartbeatClient {
@@ -44,8 +49,26 @@ impl HeartbeatClient {
         Self {
             client: Client::new(),
             server_url: server_url.trim_end_matches('/').to_string(),
-            api_token: api_token.to_string(),
+            tokens: TokenStore::new(api_token),
         }
+    }
+
+    /// Construct a client using a shared [`TokenStore`] so rotations from
+    /// the server propagate to any other subsystem that holds the store.
+    #[allow(dead_code)]
+    pub fn with_token_store(server_url: &str, tokens: TokenStore) -> Self {
+        Self {
+            client: Client::new(),
+            server_url: server_url.trim_end_matches('/').to_string(),
+            tokens,
+        }
+    }
+
+    /// Access the underlying token store (for rotation, inspection in tests,
+    /// or sharing with other subsystems).
+    #[allow(dead_code)]
+    pub fn token_store(&self) -> TokenStore {
+        self.tokens.clone()
     }
 
     pub async fn send_heartbeat(
@@ -69,7 +92,7 @@ impl HeartbeatClient {
         let res = self
             .client
             .post(&url)
-            .bearer_auth(&self.api_token)
+            .bearer_auth(self.tokens.current())
             .json(&payload)
             .send()
             .await
@@ -81,6 +104,15 @@ impl HeartbeatClient {
                 .await
                 .map_err(|e| HeartbeatError::Parse(e.to_string()))?;
             info!(agent_id = %body.agent_id, status = %body.status, "heartbeat OK");
+            // If the server issued a rotated token, apply it. Invalid tokens
+            // are logged and discarded so we stay on the previous one.
+            if let Some(new_token) = body.rotated_token.as_deref() {
+                match self.tokens.maybe_rotate(Some(new_token)) {
+                    Ok(true) => info!("bearer token rotated from heartbeat response"),
+                    Ok(false) => {}
+                    Err(e) => warn!(error = %e, "rejected rotated token from server"),
+                }
+            }
             Ok(body)
         } else {
             let status = res.status().as_u16();
@@ -175,6 +207,41 @@ mod tests {
     fn test_heartbeat_client_creation() {
         let client = HeartbeatClient::new("http://localhost:4200/", "token");
         assert_eq!(client.server_url, "http://localhost:4200");
+        assert_eq!(client.token_store().current(), "token");
+    }
+
+    #[test]
+    fn test_heartbeat_response_parses_rotated_token() {
+        let json = r#"{"agentId":"a1","status":"ONLINE","rotatedToken":"new-token-9999"}"#;
+        let resp: HeartbeatResponse = serde_json::from_str(json).unwrap();
+        assert_eq!(resp.rotated_token.as_deref(), Some("new-token-9999"));
+    }
+
+    #[test]
+    fn test_heartbeat_response_rotated_token_optional() {
+        let json = r#"{"agentId":"a1","status":"ONLINE"}"#;
+        let resp: HeartbeatResponse = serde_json::from_str(json).unwrap();
+        assert!(resp.rotated_token.is_none());
+    }
+
+    #[test]
+    fn test_heartbeat_client_applies_rotation() {
+        // Simulate the post-response code path: a rotated token on the
+        // response swaps the store's current token.
+        let client = HeartbeatClient::new("http://localhost:4200", "initial-token-abcd");
+        let resp = HeartbeatResponse {
+            agent_id: "a1".to_string(),
+            status: "ONLINE".to_string(),
+            rotated_token: Some("rotated-token-efgh".to_string()),
+        };
+        // Mirror the logic from send_heartbeat().
+        if let Some(new_token) = resp.rotated_token.as_deref() {
+            client
+                .token_store()
+                .maybe_rotate(Some(new_token))
+                .expect("valid token");
+        }
+        assert_eq!(client.token_store().current(), "rotated-token-efgh");
     }
 
     #[test]

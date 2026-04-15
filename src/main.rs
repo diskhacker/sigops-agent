@@ -3,6 +3,7 @@ mod discovery;
 mod executor;
 mod health;
 mod heartbeat;
+mod security;
 
 use clap::Parser;
 use std::sync::atomic::{AtomicBool, Ordering};
