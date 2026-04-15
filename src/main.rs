@@ -1,20 +1,13 @@
-mod config;
-mod discovery;
-mod executor;
-mod health;
-mod heartbeat;
-mod security;
-
 use clap::Parser;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tracing::{error, info, warn};
 
-use config::Config;
-use discovery::{collect_host_info, discover_tools};
-use health::serve_health;
-use heartbeat::HeartbeatClient;
+use sigops_agent::config::Config;
+use sigops_agent::discovery::{collect_host_info, discover_tools};
+use sigops_agent::health::serve_health;
+use sigops_agent::heartbeat::HeartbeatClient;
 
 #[tokio::main]
 async fn main() {
@@ -118,7 +111,7 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
-    use super::config::Config;
+    use sigops_agent::config::Config;
 
     #[test]
     fn test_agent_id_generation() {

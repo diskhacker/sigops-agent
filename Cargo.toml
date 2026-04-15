@@ -20,6 +20,8 @@ thiserror = "1"
 
 [dev-dependencies]
 mockito = "1"
+wiremock = "0.6"
+tokio = { version = "1", features = ["full", "test-util"] }
 
 [[bin]]
 name = "sigops-agent"

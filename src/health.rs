@@ -30,11 +30,8 @@ pub async fn serve_health(port: u16, shutdown: Arc<AtomicBool>, agent_id: String
             break;
         }
 
-        let accept = tokio::time::timeout(
-            std::time::Duration::from_secs(1),
-            listener.accept(),
-        )
-        .await;
+        let accept =
+            tokio::time::timeout(std::time::Duration::from_secs(1), listener.accept()).await;
 
         let (mut stream, _addr) = match accept {
             Ok(Ok(pair)) => pair,
@@ -82,11 +79,7 @@ mod tests {
         shutdown.store(true, Ordering::Relaxed);
 
         // Should complete within 2 seconds (timeout loop)
-        let result = tokio::time::timeout(
-            std::time::Duration::from_secs(3),
-            handle,
-        )
-        .await;
+        let result = tokio::time::timeout(std::time::Duration::from_secs(3), handle).await;
         assert!(result.is_ok(), "health server should shut down");
     }
 

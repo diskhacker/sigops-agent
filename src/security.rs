@@ -26,9 +26,7 @@ pub const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 30;
 ///
 /// This list is intentionally small — anything not here must be explicitly
 /// allow-listed via [`SecurityPolicy::with_allowed_commands`].
-pub const DEFAULT_ALLOWED_COMMANDS: &[&str] = &[
-    "echo", "ls", "ps", "df", "cat", "uptime", "date",
-];
+pub const DEFAULT_ALLOWED_COMMANDS: &[&str] = &["echo", "ls", "ps", "df", "cat", "uptime", "date"];
 
 /// Default deny-list of path prefixes the agent refuses to touch.
 pub const DEFAULT_DENIED_PATHS: &[&str] = &[
@@ -91,7 +89,10 @@ pub struct SecurityPolicy {
 impl Default for SecurityPolicy {
     fn default() -> Self {
         Self {
-            allowed_commands: DEFAULT_ALLOWED_COMMANDS.iter().map(|s| s.to_string()).collect(),
+            allowed_commands: DEFAULT_ALLOWED_COMMANDS
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             denied_paths: DEFAULT_DENIED_PATHS.iter().map(|s| s.to_string()).collect(),
             exec_timeout: Duration::from_secs(DEFAULT_EXEC_TIMEOUT_SECS),
             config_dir: None,
@@ -361,7 +362,11 @@ impl TokenStore {
 
     /// Return a copy of the current token.
     pub fn current(&self) -> String {
-        self.inner.lock().expect("token store poisoned").token.clone()
+        self.inner
+            .lock()
+            .expect("token store poisoned")
+            .token
+            .clone()
     }
 
     /// True if the current token is empty.
@@ -646,9 +651,7 @@ mod tests {
         assert_eq!(store.current(), "rotated-token-def");
 
         // Same token — treated as no-op.
-        let rotated = store
-            .maybe_rotate(Some("rotated-token-def"))
-            .unwrap();
+        let rotated = store.maybe_rotate(Some("rotated-token-def")).unwrap();
         assert!(!rotated);
     }
 

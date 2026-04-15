@@ -5,7 +5,11 @@ use clap::Parser;
 #[command(name = "sigops-agent", version, about)]
 pub struct Config {
     /// SigOps server URL
-    #[arg(long, env = "SIGOPS_SERVER_URL", default_value = "http://localhost:4200")]
+    #[arg(
+        long,
+        env = "SIGOPS_SERVER_URL",
+        default_value = "http://localhost:4200"
+    )]
     pub server_url: String,
 
     /// Agent ID (auto-generated if not set)
