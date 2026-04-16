@@ -1,202 +1,127 @@
 # SigOps Agent
 
-> Lightweight Rust binary that executes automation on your infrastructure.
+Lightweight Rust binary for executing SigOps workflows on your infrastructure.
 
 [![MIT License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Rust](https://img.shields.io/badge/rust-1.75+-orange.svg)](https://www.rust-lang.org/)
 
-The SigOps Agent is a ~5MB statically-linked Rust binary that runs on your servers, VMs, or containers. It connects to the SigOps platform via **outbound-only WebSocket** (no inbound ports needed), discovers available tools, executes automation steps, and reports results — all with an 8-layer security model.
-
 ---
 
-## Quick Reference
+## What It Does
 
-| | |
-|---|---|
-| **Language** | Rust (2021 edition) |
-| **Binary Size** | ~5MB (statically linked, musl) |
-| **Visibility** | PUBLIC (MIT License) |
-| **Connection** | Outbound-only WSS (no open ports on your infra) |
-| **Security** | 8-layer model (mTLS, token rotation, sandboxed execution) |
-| **Platforms** | Linux x86_64, aarch64 · macOS x86_64, aarch64 · Windows x86_64 |
+The agent runs on your servers (bare metal, VMs, containers) and executes commands dispatched by the SigOps control plane. It **phones home** — your firewall only needs outbound HTTPS to your SigOps server.
+
+Only features that exist in code on `main` today are documented here. Features planned but not shipped are listed under **Roadmap**.
 
 ---
 
 ## Why Open Source?
 
-The agent runs **inside your private infrastructure** — on your servers, in your network, with access to your services. You need to:
+The agent runs **inside your private infrastructure** — on your servers, in your network, with access to your services. Open source lets you:
 
-- **Audit the code** — verify it does only what it claims
-- **Verify no backdoors** — outbound-only connection, no data exfiltration
-- **Build from source** — compile it yourself if your security policy requires it
-- **Understand the attack surface** — know exactly what the binary does
-
-Closed-source agents in your infrastructure is a trust problem. Open source solves it.
+- **Audit the code** — verify it does only what it claims.
+- **Verify there are no backdoors** — outbound-only connection; no data exfiltration.
+- **Build from source** — compile it yourself if policy requires.
+- **Understand the attack surface** — know exactly what the binary does.
 
 ---
 
-## How It Works
+## Security Model
 
-```
-┌─────────────────────────┐         ┌─────────────────────────┐
-│  Your Infrastructure    │         │  SigOps Platform        │
-│                         │         │                         │
-│  ┌─────────────────┐   │  WSS    │  ┌─────────────────┐   │
-│  │  SigOps Agent    │───────────→│  │  Agent Gateway   │   │
-│  │  (Rust binary)   │   │ outbound│  │  (WebSocket)     │   │
-│  │                  │←──────────│  │                  │   │
-│  │  ● Heartbeat     │   │  only  │  │  ● Route commands│   │
-│  │  ● Tool discover │   │        │  │  ● Track status  │   │
-│  │  ● Execute steps │   │        │  │  ● Collect results│  │
-│  │  ● Report results│   │        │  └─────────────────┘   │
-│  └─────────────────┘   │         │                         │
-│                         │         │  Dashboard shows:       │
-│  Services it can reach: │         │  ● Agent status         │
-│  ● nginx, postgres      │         │  ● Available tools      │
-│  ● docker, systemctl    │         │  ● Execution results    │
-│  ● kubernetes, pm2      │         │                         │
-└─────────────────────────┘         └─────────────────────────┘
-```
+Current security layers (implemented today):
 
-**Key principle:** The agent initiates ALL connections outbound. Your firewall rules stay unchanged. No ports to open, no ingress rules to add.
+- **Command whitelist** — only pre-approved commands can execute.
+- **Path deny list** — blocks access to sensitive directories.
+- **Execution timeout** — hard kill (SIGKILL) after a configurable limit.
+- **Token rotation** — API tokens refresh on each heartbeat cycle.
+- **Outbound-only** — the agent initiates all connections; no inbound ports are required.
+  The optional local `/health` endpoint on `:9100` can be disabled with `--no-health`.
+
+Items like mTLS, namespace/cgroup sandboxing, and ed25519 command-signature verification are on the **Roadmap** — they are not shipped yet. Do not rely on them for threat modeling.
 
 ---
 
-## Install
+## Transport
 
-### Pre-built binaries
+The agent communicates with the SigOps control plane via **HTTP long-polling** with exponential backoff. It requires outbound HTTPS to your SigOps server URL. WebSocket transport is planned (see Roadmap) but not implemented today.
 
-```bash
-# Linux x86_64
-curl -fsSL https://get.sigops.dev/agent | sh
+Flow:
 
-# Or download directly
-wget https://github.com/<your-org>/sigops-agent/releases/latest/download/sigops-agent-linux-x86_64
-chmod +x sigops-agent-linux-x86_64
-sudo mv sigops-agent-linux-x86_64 /usr/local/bin/sigops-agent
+```
+┌──────────────────────────┐              ┌──────────────────────────┐
+│  Your infrastructure     │              │  SigOps control plane    │
+│                          │              │                          │
+│  ┌──────────────────┐    │   outbound   │  ┌──────────────────┐   │
+│  │  sigops-agent    │───  HTTPS ───────▶│  │  /agent/heartbeat │   │
+│  │  (Rust binary)   │                   │  │  /agent/fetch     │   │
+│  │                  │◀── responses ─────│  │  /agent/report    │   │
+│  │  ● heartbeat     │                   │  └──────────────────┘   │
+│  │  ● fetch-next    │                   │                          │
+│  │  ● execute       │                   │  Dashboard shows:        │
+│  │  ● report        │                   │   ● agent status         │
+│  └──────────────────┘    │              │   ● available tools      │
+│                          │              │   ● execution results    │
+└──────────────────────────┘              └──────────────────────────┘
 ```
 
-### Build from source
+---
+
+## Built-in Tools
+
+- `restart_service` — `systemctl restart <unit>`
+- `http_request` — arbitrary HTTP calls
+- `notify_slack` — Slack webhook
+- `wait` — timed pause
+- `condition` — conditional branching
+
+---
+
+## Installation
+
+### From source
 
 ```bash
 # Prerequisites: Rust 1.75+
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone and build
-git clone https://github.com/<your-org>/sigops-agent.git
+git clone https://github.com/diskhacker/sigops-agent.git
 cd sigops-agent
 cargo build --release
 
-# Binary at target/release/sigops-agent (~5MB)
+# Run it
+./target/release/sigops-agent \
+  --server-url https://sigops.example.com \
+  --api-key ag_xxx
 ```
 
-### Docker
+Pre-built installers and container images are planned (see Roadmap) but not published today.
 
-```bash
-docker run -d \
-  --name sigops-agent \
-  -e SIGOPS_URL=wss://your-sigops-instance.com/agent/ws \
-  -e SIGOPS_TOKEN=<agent-token-from-dashboard> \
-  ghcr.io/<your-org>/sigops-agent:latest
-```
+### Configuration
+
+| Env var | CLI flag | Description | Default |
+|---|---|---|---|
+| `SIGOPS_SERVER_URL` | `--server-url` | Control plane URL | required |
+| `SIGOPS_API_KEY` | `--api-key` | Agent API key | required |
+| `SIGOPS_POLL_INTERVAL` | `--poll-interval` | Heartbeat interval (seconds) | `30` |
+| `SIGOPS_HEALTH_PORT` | `--health-port` | Local health endpoint port | `9100` |
+| `SIGOPS_NO_HEALTH` | `--no-health` | Disable the local health endpoint | `false` |
+| `SIGOPS_LOG_LEVEL` | `--log-level` | `debug` \| `info` \| `warn` \| `error` | `info` |
 
 ---
 
-## Configuration
+## Requirements
 
-```bash
-# /etc/sigops/agent.toml (or environment variables)
-
-[connection]
-url = "wss://your-sigops-instance.com/agent/ws"    # SIGOPS_URL
-token = "<agent-token>"                              # SIGOPS_TOKEN
-reconnect_interval_sec = 5
-heartbeat_interval_sec = 30
-
-[identity]
-hostname = "web-01"                                  # auto-detected if empty
-labels = { env = "production", region = "us-east", tier = "web" }
-
-[security]
-allowed_commands = ["systemctl", "docker", "pm2"]    # whitelist
-denied_paths = ["/etc/shadow", "/root"]              # never access these
-max_execution_time_sec = 300                          # 5 min hard limit
-sandbox = true                                        # enable sandboxed execution
-
-[logging]
-level = "info"                                        # debug, info, warn, error
-file = "/var/log/sigops-agent.log"
-max_size_mb = 100
-```
-
----
-
-## Repository Structure
-
-```
-sigops-agent/
-├── Cargo.toml                # Rust project config
-├── Cargo.lock
-├── LICENSE                   # MIT
-├── README.md                 # This file
-├── SECURITY.md               # Vulnerability reporting
-├── CONTRIBUTING.md
-│
-├── src/
-│   ├── main.rs               # Entry point
-│   ├── config.rs             # Configuration parsing (TOML + env)
-│   ├── ws/
-│   │   ├── client.rs         # WebSocket client (tokio-tungstenite)
-│   │   ├── reconnect.rs      # Auto-reconnect with backoff
-│   │   └── messages.rs       # Message types (command, result, heartbeat)
-│   ├── tools/
-│   │   ├── executor.rs       # Tool execution engine
-│   │   ├── registry.rs       # Available tools on this host
-│   │   └── builtin.rs        # Built-in tools (restart, http, wait)
-│   ├── discovery/
-│   │   ├── service.rs        # Auto-discover running services
-│   │   ├── tool.rs           # Auto-discover available tools
-│   │   └── system.rs         # OS, CPU, memory, disk info
-│   ├── security/
-│   │   ├── sandbox.rs        # Sandboxed execution
-│   │   ├── whitelist.rs      # Command whitelist enforcement
-│   │   ├── token.rs          # Token rotation
-│   │   └── tls.rs            # mTLS certificate management
-│   └── heartbeat/
-│       └── reporter.rs       # Health + tool list reporting
-│
-├── tests/
-│   ├── integration/
-│   └── unit/
-│
-└── .github/
-    └── workflows/
-        ├── build.yml          # CI: build + test all platforms
-        └── release.yml        # CD: build binaries + publish
-```
-
----
-
-## 8-Layer Security Model
-
-| Layer | Protection |
-|-------|-----------|
-| 1. Outbound-only | Agent initiates all connections — no open ports |
-| 2. mTLS | Mutual TLS between agent and platform |
-| 3. Token rotation | Agent tokens auto-rotate every 24h |
-| 4. Command whitelist | Only whitelisted commands can execute |
-| 5. Path deny-list | Sensitive paths (/etc/shadow, /root) blocked |
-| 6. Execution timeout | Hard 5-minute limit per step |
-| 7. Sandboxed execution | Commands run in restricted context |
-| 8. Signed commands | Platform signs commands, agent verifies signature |
+- **Linux** (x86_64, aarch64), **macOS** (x86_64, aarch64), or **Windows** (x86_64)
+- **Outbound HTTPS** connectivity to your SigOps server
 
 ---
 
 ## Development
 
 ```bash
-# Run in development mode
-cargo run -- --config dev.toml
+# Run in debug mode
+cargo run -- --server-url http://localhost:4200 --api-key dev-token
 
 # Run tests
 cargo test
@@ -204,14 +129,18 @@ cargo test
 # Build release binary
 cargo build --release
 
-# Cross-compile for Linux (from macOS)
+# Cross-compile for Linux musl (from macOS)
 cargo install cross
 cross build --release --target x86_64-unknown-linux-musl
 ```
 
+CI runs `cargo fmt --check`, `cargo clippy -D warnings`, `cargo test --all-targets`, and `cargo build --release` on Ubuntu, macOS, and Windows for every push/PR to `main`.
+
 ---
 
-## Systemd Service
+## Running as a Service
+
+### systemd (Linux)
 
 ```ini
 # /etc/systemd/system/sigops-agent.service
@@ -222,7 +151,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/sigops-agent --config /etc/sigops/agent.toml
+Environment=SIGOPS_SERVER_URL=https://sigops.example.com
+Environment=SIGOPS_API_KEY=ag_xxx
+ExecStart=/usr/local/bin/sigops-agent
 Restart=always
 RestartSec=5
 User=sigops
@@ -238,10 +169,27 @@ sudo systemctl start sigops-agent
 sudo journalctl -u sigops-agent -f
 ```
 
+The systemd unit file above is an example — a packaged unit is part of the installer work on the Roadmap.
+
+---
+
+## Roadmap
+
+Planned but not yet shipped:
+
+- [ ] **WebSocket transport** (replace HTTP polling for lower latency)
+- [ ] **mTLS** client certificates
+- [ ] **Command signature verification** (ed25519)
+- [ ] **Namespace / cgroup sandboxing** (Linux)
+- [ ] **Auto-update** with version pinning
+- [ ] **Pre-built installers** (`.deb`, `.rpm`, Homebrew, MSI)
+- [ ] **Container image** on GHCR
+- [ ] **Code-signed releases** (Authenticode + macOS notarization)
+- [ ] **Additional executor adapters** (`pm2`, `kubectl`)
+- [ ] **`cargo audit` / SBOM** in CI
+
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
-
----
+MIT — ClusterAssets Innovation Pvt. Ltd.
