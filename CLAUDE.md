@@ -7,7 +7,7 @@
 **README rewritten to match shipped code.** Do NOT claim features from this CLAUDE.md spec that are not yet implemented in `src/`.
 
 Current reality:
-- Transport: **HTTP long-polling**, not WebSocket. `tokio-tungstenite` is in `Cargo.toml` but not on the heartbeat path.
+- Transport: **HTTP long-polling**, not WebSocket. `tokio-tungstenite` is NOT in `Cargo.toml` — WebSocket transport is not yet implemented.
 - Security layers implemented: command whitelist, path deny list, execution timeout (SIGKILL), token rotation per heartbeat, outbound-only HTTP.
 - Security layers **NOT implemented** (despite legacy 8-layer docs below): mTLS (Layer 2), sandbox (Layer 7), signed commands (Layer 8). `sha2`/`ring` are not in `Cargo.toml`.
 - Module layout is **flat**: `config.rs`, `discovery.rs`, `heartbeat.rs`, `executor.rs`, `security.rs`, `health.rs`, `main.rs`, `lib.rs`. The nested `ws/`, `tools/`, `discovery/`, `security/` tree below is aspirational, not current.
