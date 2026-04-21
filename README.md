@@ -68,11 +68,11 @@ Flow:
 
 ## Built-in Tools
 
-- `restart_service` — `systemctl restart <unit>`
-- `http_request` — arbitrary HTTP calls
-- `notify_slack` — Slack webhook
-- `wait` — timed pause
-- `condition` — conditional branching
+- `sigops.restart` — `systemctl restart <unit>` (falls back to `service` on older distros)
+- `sigops.http` — arbitrary HTTP calls (spawns `curl` as a subprocess; curl must be in PATH)
+- `sigops.notify_slack` — Slack webhook
+- `sigops.wait` — timed pause
+- `sigops.condition` — conditional branching
 
 ---
 

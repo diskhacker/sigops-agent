@@ -49,7 +49,13 @@ Session: /docs/session/ | Memory: /docs/memory/memory.md
 6. **Reports** step results back via HTTP POST.
 
 ## Built-in Tools (5)
-`restart_service`, `http_request`, `notify_slack`, `wait`, `condition`.
+`sigops.restart`, `sigops.http`, `sigops.notify_slack`, `sigops.wait`, `sigops.condition`.
+
+- `sigops.restart` — restarts a named service via `systemctl restart <unit>` (Linux) or `service <unit> restart` (older distros). `systemctl` / `service` must be in PATH and in the security whitelist.
+- `sigops.http` — makes arbitrary HTTP requests. Spawns `curl` as a subprocess (not using reqwest directly). `curl` must be installed and available in PATH on the agent host.
+- `sigops.notify_slack` — sends a message to a Slack channel via an incoming webhook URL. Also uses `curl` under the hood.
+- `sigops.wait` — pauses execution for a given number of seconds (max 3600).
+- `sigops.condition` — evaluates a simple numeric comparison expression (e.g. `"10 > 5"`) and returns a boolean result.
 
 ## HARD RULES
 1. OUTBOUND ONLY — agent does not listen on any port other than the optional local `/health` (disablable).

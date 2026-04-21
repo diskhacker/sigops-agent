@@ -26,7 +26,9 @@ pub const DEFAULT_EXEC_TIMEOUT_SECS: u64 = 30;
 ///
 /// This list is intentionally small — anything not here must be explicitly
 /// allow-listed via [`SecurityPolicy::with_allowed_commands`].
-pub const DEFAULT_ALLOWED_COMMANDS: &[&str] = &["echo", "ls", "ps", "df", "cat", "uptime", "date"];
+pub const DEFAULT_ALLOWED_COMMANDS: &[&str] = &[
+    "echo", "ls", "ps", "df", "cat", "uptime", "date", "systemctl", "service", "curl",
+];
 
 /// Default deny-list of path prefixes the agent refuses to touch.
 pub const DEFAULT_DENIED_PATHS: &[&str] = &[
